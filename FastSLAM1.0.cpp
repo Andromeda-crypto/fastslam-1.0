@@ -1,5 +1,6 @@
 // FastSLAM1.0.cpp
-// FastSLAM 1.0 starter using range + bearing observations
+// FastSLAM 1.0 using range + bearing observations
+// Includes synthetic simulator test loop and RMSE evaluation
 
 #include <iostream>
 #include <vector>
@@ -8,13 +9,10 @@
 #include <algorithm>
 #include <Eigen/Dense>
 
-constexpr double PI = std::acos(-1.0);
+#include "Types.h"
+#include "Simulator.h"
 
-struct Observation {
-    int landmark_id;
-    double range;
-    double bearing;
-};
+constexpr double PI = std::acos(-1.0);
 
 struct Landmark {
     Eigen::Vector2d mean;
@@ -245,27 +243,55 @@ private:
 };
 
 int main() {
+    constexpr int NUM_STEPS = 50;
+
     FastSLAM slam(100, 3);
+    Simulator simulator;
 
-    for (int t = 0; t < 10; t++) {
-        slam.predict(1.0, 0.1, 0.1);
+    double total_position_error_squared = 0.0;
 
-        std::vector<Observation> observations = {
-            {0, 5.0, 0.2},
-            {1, 7.0, -0.3}
-        };
+    for (int t = 0; t < NUM_STEPS; t++) {
+        double velocity = 1.0;
+        double angular_velocity = 0.05;
+        double dt = 0.1;
 
+        simulator.move(velocity, angular_velocity, dt);
+
+        std::vector<Observation> observations =
+            simulator.generateObservations();
+
+        slam.predict(velocity, angular_velocity, dt);
         slam.update(observations);
         slam.resample();
+
+        const auto& particles = slam.getParticles();
+        Eigen::Vector3d true_pose = simulator.getTruePose();
+
+        Eigen::Vector3d estimate;
+        estimate << 0.0, 0.0, 0.0;
+
+        for (const auto& particle : particles) {
+            estimate += particle.pose;
+        }
+
+        estimate /= static_cast<double>(particles.size());
+
+        double dx = estimate(0) - true_pose(0);
+        double dy = estimate(1) - true_pose(1);
+        double position_error = std::sqrt(dx * dx + dy * dy);
+
+        total_position_error_squared += position_error * position_error;
+
+        std::cout << "Step " << t << "\n";
+        std::cout << "True pose:\n" << true_pose << "\n";
+        std::cout << "Estimated mean pose:\n" << estimate << "\n";
+        std::cout << "Position error: " << position_error << "\n\n";
     }
 
-    const auto& particles = slam.getParticles();
+    double trajectory_rmse =
+        std::sqrt(total_position_error_squared / static_cast<double>(NUM_STEPS));
 
-    std::cout << "First particle pose:\n";
-    std::cout << particles[0].pose << "\n";
-
-    std::cout << "\nFirst particle landmark 0 estimate:\n";
-    std::cout << particles[0].landmarks[0].mean << "\n";
+    std::cout << "Trajectory RMSE: " << trajectory_rmse << "\n";
 
     return 0;
 }
