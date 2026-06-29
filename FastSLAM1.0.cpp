@@ -115,6 +115,32 @@ public:
         return particles;
     }
 
+        Eigen::Vector3d estimatePoseMean() const {
+        Eigen::Vector3d estimate;
+        estimate << 0.0, 0.0, 0.0;
+
+        for (const auto& particle: particles) {
+            estimate += particle.pose;
+        }
+
+        return estimate / static_cast<double>(particles.size());
+    }
+    
+    double effectiveSampleSize() const {
+        double sum_squared_weights = 0.0;
+        
+        for (const auto& particle: particles) {
+            sum_squared_weights += particle.weight * particle.weight;
+        }
+
+        if (sum_squared_weights <= 1e-12){
+            return 0.0;
+        }
+        return 1.0/sum_squared_weights;
+    }
+
+
+
 private:
     int num_particles;
     int num_landmarks;
@@ -240,6 +266,7 @@ private:
             angle += 2.0 * PI;
         }
     }
+
 };
 
 int main() {
@@ -262,19 +289,16 @@ int main() {
 
         slam.predict(velocity, angular_velocity, dt);
         slam.update(observations);
-        slam.resample();
+        double n_eff = slam.effectiveSampleSize();
+        if (n_eff < 80.0){
+            slam.resample();
+        }
+
 
         const auto& particles = slam.getParticles();
         Eigen::Vector3d true_pose = simulator.getTruePose();
 
-        Eigen::Vector3d estimate;
-        estimate << 0.0, 0.0, 0.0;
-
-        for (const auto& particle : particles) {
-            estimate += particle.pose;
-        }
-
-        estimate /= static_cast<double>(particles.size());
+        Eigen::Vector3d estimate = slam.estimatePoseMean();
 
         double dx = estimate(0) - true_pose(0);
         double dy = estimate(1) - true_pose(1);
@@ -286,6 +310,7 @@ int main() {
         std::cout << "True pose:\n" << true_pose << "\n";
         std::cout << "Estimated mean pose:\n" << estimate << "\n";
         std::cout << "Position error: " << position_error << "\n\n";
+        std::cout <<"Effective Sample Size: "<< n_eff << "\n\n";
     }
 
     double trajectory_rmse =
