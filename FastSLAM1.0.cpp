@@ -8,6 +8,7 @@
 #include <random>
 #include <algorithm>
 #include <Eigen/Dense>
+#include <fstream>
 
 #include "Types.h"
 #include "Simulator.h"
@@ -277,6 +278,11 @@ int main() {
 
     double total_position_error_squared = 0.0;
 
+    std::ofstream log_file("fastslam_results.csv");
+    log_file << "step,true_x,true_y,true_theta,"
+             << "est_x,est_y,est_theta,"
+             << "position_error,effective_sample_size\n";
+
     for (int t = 0; t < NUM_STEPS; t++) {
         double velocity = 1.0;
         double angular_velocity = 0.05;
@@ -303,6 +309,15 @@ int main() {
         double dx = estimate(0) - true_pose(0);
         double dy = estimate(1) - true_pose(1);
         double position_error = std::sqrt(dx * dx + dy * dy);
+        log_file << t << ","
+         << true_pose(0) << ","
+         << true_pose(1) << ","
+         << true_pose(2) << ","
+         << estimate(0) << ","
+         << estimate(1) << ","
+         << estimate(2) << ","
+         << position_error << ","
+         << n_eff << "\n";
 
         total_position_error_squared += position_error * position_error;
 
@@ -317,6 +332,9 @@ int main() {
         std::sqrt(total_position_error_squared / static_cast<double>(NUM_STEPS));
 
     std::cout << "Trajectory RMSE: " << trajectory_rmse << "\n";
+    log_file.close();
+
+    std::cout << "Saved results to fastslam_results.csv\n";
 
     return 0;
 }
