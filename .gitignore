@@ -1,0 +1,23 @@
+# Build directories
+build/
+
+# Compiled binaries
+*.exe
+*.out
+*.o
+*.obj
+
+# Generated results
+results/
+data/synthetic/*.csv
+
+# Python cache
+__pycache__/
+*.pyc
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

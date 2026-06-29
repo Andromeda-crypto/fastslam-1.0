@@ -1,17 +1,18 @@
 // FastSLAM1.0.cpp
 // FastSLAM 1.0 using range + bearing observations
-// Includes synthetic simulator test loop and RMSE evaluation
+// Dataset-driven run with trajectory and landmark RMSE evaluation
 
 #include <iostream>
 #include <vector>
 #include <cmath>
 #include <random>
 #include <algorithm>
-#include <Eigen/Dense>
 #include <fstream>
+#include <Eigen/Dense>
 
 #include "Types.h"
-#include "Simulator.h"
+#include "DatasetLoader.h"
+#include "World.h"
 
 constexpr double PI = std::acos(-1.0);
 
@@ -112,77 +113,72 @@ public:
         particles = new_particles;
     }
 
-    const std::vector<Particle>& getParticles() const {
-        return particles;
-    }
-
-        Eigen::Vector3d estimatePoseMean() const {
+    Eigen::Vector3d estimatePoseMean() const {
         Eigen::Vector3d estimate;
         estimate << 0.0, 0.0, 0.0;
 
-        for (const auto& particle: particles) {
-            estimate += particle.pose;
+        for (const auto& particle : particles) {
+            estimate += particle.weight * particle.pose;
         }
 
-        return estimate / static_cast<double>(particles.size());
+        return estimate;
     }
-    
+
     double effectiveSampleSize() const {
         double sum_squared_weights = 0.0;
-        
-        for (const auto& particle: particles) {
+
+        for (const auto& particle : particles) {
             sum_squared_weights += particle.weight * particle.weight;
         }
 
-        if (sum_squared_weights <= 1e-12){
+        if (sum_squared_weights <= 1e-12) {
             return 0.0;
         }
-        return 1.0/sum_squared_weights;
+
+        return 1.0 / sum_squared_weights;
     }
 
     double landmarkRMSE(const std::vector<Eigen::Vector2d>& true_landmarks) const {
-    if (particles.empty() || true_landmarks.empty()) {
-        return 0.0;
-    }
+        if (particles.empty() || true_landmarks.empty()) {
+            return 0.0;
+        }
 
-    const Particle& best_particle =
-        *std::max_element(
-            particles.begin(),
-            particles.end(),
-            [](const Particle& a, const Particle& b) {
-                return a.weight < b.weight;
+        const Particle& best_particle =
+            *std::max_element(
+                particles.begin(),
+                particles.end(),
+                [](const Particle& a, const Particle& b) {
+                    return a.weight < b.weight;
+                }
+            );
+
+        double total_error_squared = 0.0;
+        int count = 0;
+
+        for (int i = 0; i < static_cast<int>(true_landmarks.size()); i++) {
+            if (i >= static_cast<int>(best_particle.landmarks.size())) {
+                continue;
             }
-        );
 
-    double total_error_squared = 0.0;
-    int count = 0;
+            const Landmark& lm = best_particle.landmarks[i];
 
-    for (int i = 0; i < static_cast<int>(true_landmarks.size()); i++) {
-        if (i >= static_cast<int>(best_particle.landmarks.size())) {
-            continue;
+            if (!lm.observed) {
+                continue;
+            }
+
+            double dx = lm.mean(0) - true_landmarks[i](0);
+            double dy = lm.mean(1) - true_landmarks[i](1);
+
+            total_error_squared += dx * dx + dy * dy;
+            count++;
         }
 
-        const Landmark& lm = best_particle.landmarks[i];
-
-        if (!lm.observed) {
-            continue;
+        if (count == 0) {
+            return 0.0;
         }
 
-        double dx = lm.mean(0) - true_landmarks[i](0);
-        double dy = lm.mean(1) - true_landmarks[i](1);
-
-        total_error_squared += dx * dx + dy * dy;
-        count++;
+        return std::sqrt(total_error_squared / static_cast<double>(count));
     }
-
-    if (count == 0) {
-        return 0.0;
-    }
-
-    return std::sqrt(total_error_squared / static_cast<double>(count));
-    }
-
-
 
 private:
     int num_particles;
@@ -309,77 +305,98 @@ private:
             angle += 2.0 * PI;
         }
     }
-
 };
 
 int main() {
-    constexpr int NUM_STEPS = 50;
+    constexpr int NUM_LANDMARKS = 3;
+    constexpr int NUM_PARTICLES = 100;
+    constexpr double DT = 0.1;
 
-    FastSLAM slam(100, 3);
-    Simulator simulator;
+    FastSLAM slam(NUM_PARTICLES, NUM_LANDMARKS);
+    World world;
 
-    double total_position_error_squared = 0.0;
+    DatasetLoader loader;
 
-    std::ofstream log_file("fastslam_results.csv");
+    if (!loader.load("data/synthetic/synthetic_dataset.csv")) {
+        std::cerr << "Failed to load dataset.\n";
+        return 1;
+    }
+
+    std::ofstream log_file("results/fastslam_results.csv");
+
+    if (!log_file.is_open()) {
+        std::cerr << "Failed to open results file.\n";
+        return 1;
+    }
+
     log_file << "step,true_x,true_y,true_theta,"
              << "est_x,est_y,est_theta,"
              << "position_error,effective_sample_size\n";
 
-    for (int t = 0; t < NUM_STEPS; t++) {
-        double velocity = 1.0;
-        double angular_velocity = 0.05;
-        double dt = 0.1;
+    double total_position_error_squared = 0.0;
+    int evaluated_steps = 0;
 
-        simulator.move(velocity, angular_velocity, dt);
+    while (loader.hasNext()) {
+        DatasetFrame frame = loader.nextFrame();
 
-        std::vector<Observation> observations =
-            simulator.generateObservations();
+        slam.predict(
+            frame.velocity,
+            frame.angularVelocity,
+            DT
+        );
 
-        slam.predict(velocity, angular_velocity, dt);
-        slam.update(observations);
+        slam.update(frame.observations);
+
         double n_eff = slam.effectiveSampleSize();
-        if (n_eff < 80.0){
+
+        if (n_eff < 80.0) {
             slam.resample();
         }
 
+        Eigen::Vector3d estimate_pose = slam.estimatePoseMean();
 
-        const auto& particles = slam.getParticles();
-        Eigen::Vector3d true_pose = simulator.getTruePose();
-
-        Eigen::Vector3d estimate = slam.estimatePoseMean();
-
-        double dx = estimate(0) - true_pose(0);
-        double dy = estimate(1) - true_pose(1);
+        double dx = estimate_pose(0) - frame.trueX;
+        double dy = estimate_pose(1) - frame.trueY;
         double position_error = std::sqrt(dx * dx + dy * dy);
-        log_file << t << ","
-         << true_pose(0) << ","
-         << true_pose(1) << ","
-         << true_pose(2) << ","
-         << estimate(0) << ","
-         << estimate(1) << ","
-         << estimate(2) << ","
-         << position_error << ","
-         << n_eff << "\n";
 
         total_position_error_squared += position_error * position_error;
+        evaluated_steps++;
 
-        std::cout << "Step " << t << "\n";
-        std::cout << "True pose:\n" << true_pose << "\n";
-        std::cout << "Estimated mean pose:\n" << estimate << "\n";
-        std::cout << "Position error: " << position_error << "\n\n";
-        std::cout <<"Effective Sample Size: "<< n_eff << "\n\n";
+        std::cout << "Step " << frame.step << "\n";
+        std::cout << "True pose:\n"
+                  << frame.trueX << "\n"
+                  << frame.trueY << "\n"
+                  << frame.trueTheta << "\n";
+        std::cout << "Estimated mean pose:\n" << estimate_pose << "\n";
+        std::cout << "Position error: " << position_error << "\n";
+        std::cout << "Effective Sample Size: " << n_eff << "\n\n";
+
+        log_file << frame.step << ","
+                 << frame.trueX << ","
+                 << frame.trueY << ","
+                 << frame.trueTheta << ","
+                 << estimate_pose(0) << ","
+                 << estimate_pose(1) << ","
+                 << estimate_pose(2) << ","
+                 << position_error << ","
+                 << n_eff << "\n";
+    }
+
+    log_file.close();
+
+    if (evaluated_steps == 0) {
+        std::cerr << "No dataset frames were evaluated.\n";
+        return 1;
     }
 
     double trajectory_rmse =
-        std::sqrt(total_position_error_squared / static_cast<double>(NUM_STEPS));
+        std::sqrt(total_position_error_squared / static_cast<double>(evaluated_steps));
+
+    double landmark_rmse = slam.landmarkRMSE(world.landmarks);
 
     std::cout << "Trajectory RMSE: " << trajectory_rmse << "\n";
-    double landmark_rmse = slam.landmarkRMSE(simulator.getTrueLandmarks());
-
     std::cout << "Landmark RMSE: " << landmark_rmse << "\n";
-    log_file.close();
-
-    std::cout << "Saved results to fastslam_results.csv\n";
+    std::cout << "Saved results to results/fastslam_results.csv\n";
 
     return 0;
 }

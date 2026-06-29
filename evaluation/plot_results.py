@@ -9,7 +9,9 @@ est_y = []
 position_error = []
 n_eff = []
 
-with open("fastslam_results.csv", "r") as file:
+input_file = "results/fastslam_results.csv"
+
+with open(input_file, "r") as file:
     reader = csv.DictReader(file)
 
     for row in reader:
@@ -30,7 +32,7 @@ plt.title("FastSLAM Trajectory")
 plt.legend()
 plt.axis("equal")
 plt.grid(True)
-plt.savefig("trajectory_plot.png")
+plt.savefig("results/trajectory_plot.png")
 plt.show()
 
 plt.figure()
@@ -39,7 +41,7 @@ plt.xlabel("Step")
 plt.ylabel("Position Error")
 plt.title("FastSLAM Position Error")
 plt.grid(True)
-plt.savefig("position_error_plot.png")
+plt.savefig("results/position_error_plot.png")
 plt.show()
 
 plt.figure()
@@ -48,5 +50,5 @@ plt.xlabel("Step")
 plt.ylabel("Effective Sample Size")
 plt.title("Particle Filter Effective Sample Size")
 plt.grid(True)
-plt.savefig("effective_sample_size_plot.png")
+plt.savefig("results/effective_sample_size_plot.png")
 plt.show()
