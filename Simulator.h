@@ -15,6 +15,7 @@ public:
     std::vector<Observation> generateObservations();
 
     Eigen::Vector3d getTruePose() const;
+    const std::vector<Eigen::Vector2d>& getTrueLandmarks() const;
 
 private:
     Eigen::Vector3d true_pose;

@@ -58,3 +58,7 @@ void Simulator::normalizeAngle(double& angle) {
         angle += 2.0 * PI;
     }
 }
+
+const std::vector<Eigen::Vector2d>& Simulator::getTrueLandmarks() const {
+    return world.landmarks;
+}

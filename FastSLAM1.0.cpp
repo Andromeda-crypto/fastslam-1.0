@@ -140,6 +140,48 @@ public:
         return 1.0/sum_squared_weights;
     }
 
+    double landmarkRMSE(const std::vector<Eigen::Vector2d>& true_landmarks) const {
+    if (particles.empty() || true_landmarks.empty()) {
+        return 0.0;
+    }
+
+    const Particle& best_particle =
+        *std::max_element(
+            particles.begin(),
+            particles.end(),
+            [](const Particle& a, const Particle& b) {
+                return a.weight < b.weight;
+            }
+        );
+
+    double total_error_squared = 0.0;
+    int count = 0;
+
+    for (int i = 0; i < static_cast<int>(true_landmarks.size()); i++) {
+        if (i >= static_cast<int>(best_particle.landmarks.size())) {
+            continue;
+        }
+
+        const Landmark& lm = best_particle.landmarks[i];
+
+        if (!lm.observed) {
+            continue;
+        }
+
+        double dx = lm.mean(0) - true_landmarks[i](0);
+        double dy = lm.mean(1) - true_landmarks[i](1);
+
+        total_error_squared += dx * dx + dy * dy;
+        count++;
+    }
+
+    if (count == 0) {
+        return 0.0;
+    }
+
+    return std::sqrt(total_error_squared / static_cast<double>(count));
+    }
+
 
 
 private:
@@ -332,6 +374,9 @@ int main() {
         std::sqrt(total_position_error_squared / static_cast<double>(NUM_STEPS));
 
     std::cout << "Trajectory RMSE: " << trajectory_rmse << "\n";
+    double landmark_rmse = slam.landmarkRMSE(simulator.getTrueLandmarks());
+
+    std::cout << "Landmark RMSE: " << landmark_rmse << "\n";
     log_file.close();
 
     std::cout << "Saved results to fastslam_results.csv\n";
